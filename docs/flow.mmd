@@ -1,0 +1,8 @@
+flowchart TB
+    C[Client] --> |"Tx Request with Access Token (1)"| P{Proxy} --> |"Signed Tx (3)"| DB[("Fabric Network")]
+    P  --> |"Register+Enroll (2a)"| CA["Certificate Authority (CA)"]
+    DB --> |"Tx Response (4)"| P
+    P  --> |"Tx Response (4)"| C
+    CA --> |"Certificate (2b)"| P
+
+    linkStyle default orthogonal

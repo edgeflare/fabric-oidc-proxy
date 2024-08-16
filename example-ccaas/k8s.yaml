@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: assetcc
+  name: assetcc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: assetcc
+  template:
+    metadata:
+      labels:
+        app: assetcc
+    spec:
+      containers:
+      - image: docker.io/edgeflare/fabric-ccaas-example:asset_cc
+        name: assetcc
+        ports:
+        - containerPort: 7052
+        env:
+        # mandatory. in the format ${CHAINCODE_NAME}_${CHAINCODE_VERSION}:"sha256sum packaged_cc.tar.gz"
+        # or obtain by running as admin: peer lifecycle chaincode queryinstalled
+        - name: CHAINCODE_ID
+          value: ""
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: assetcc
+  name: assetcc
+spec:
+  ports:
+  - name: grpc
+    port: 7052
+    protocol: TCP
+    targetPort: 7052
+  selector:
+    app: assetcc
+  type: ClusterIP
+---
