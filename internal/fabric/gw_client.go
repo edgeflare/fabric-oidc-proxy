@@ -10,10 +10,9 @@ import (
 	"time"
 
 	"github.com/edgeflare/fabric-oidc-proxy/internal/config"
-	"github.com/edgeflare/pgo"
+	"github.com/edgeflare/pgo/pkg/httputil"
 	"github.com/hyperledger/fabric-gateway/pkg/client"
 	"github.com/hyperledger/fabric-gateway/pkg/identity"
-	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -103,19 +102,23 @@ func newGrpcConnection(ctx context.Context) (*grpc.ClientConn, error) {
 // It retrieves user information from the context, creates a gateway client using the user's credentials,
 // and submits the transaction to the specified channel and chaincode.
 func SubmitTransaction(ctx context.Context, channelID, chaincodeID, fn string, args ...string) ([]byte, error) {
-	user, ok := ctx.Value(pgo.OIDCUserCtxKey).(*oidc.IntrospectionResponse)
-	if !ok || user == nil {
+	claims, ok := ctx.Value(httputil.OIDCUserCtxKey).(map[string]any)
+	if !ok || claims == nil {
 		return nil, fmt.Errorf("no user found")
 	}
 
-	userDir := filepath.Join(cfg.Fabric.CA.ClientHome, "users", user.Subject)
+	userSub, ok := claims["sub"].(string)
+	if !ok || userSub == "" {
+		return nil, fmt.Errorf("no user found")
+	}
+	userDir := filepath.Join(cfg.Fabric.CA.ClientHome, "users", userSub)
 
 	keyPath, err := GetMSPKeyfile(userDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MSP keyfile: %w", err)
 	}
 
-	certPath := filepath.Join(cfg.Fabric.CA.ClientHome, "users", user.Subject, "msp", "signcerts", "cert.pem")
+	certPath := filepath.Join(cfg.Fabric.CA.ClientHome, "users", userSub, "msp", "signcerts", "cert.pem")
 
 	cfg := config.Config{
 		Fabric: config.FabricConfig{

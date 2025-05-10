@@ -6,23 +6,23 @@ import (
 	"net/http"
 
 	"github.com/edgeflare/fabric-oidc-proxy/internal/fabric"
-	"github.com/edgeflare/pgo"
+	"github.com/edgeflare/pgo/pkg/httputil"
 )
 
 type TxRequest struct {
-	Name string   `json:"name"`
+	Func string   `json:"func"`
 	Args []string `json:"args"`
 }
 
 func submitTxHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := pgo.OIDCUser(r)
-	if !ok || user.Active == false {
+	claims, ok := httputil.OIDCUser(r)
+	if !ok || claims == nil {
 		http.Error(w, "no user found", http.StatusUnauthorized)
 		return
 	}
 
 	var req TxRequest
-	if err := pgo.BindOrRespondError(r, w, &req); err != nil {
+	if err := httputil.BindOrError(r, w, &req); err != nil {
 		return
 	}
 
@@ -32,17 +32,18 @@ func submitTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resultBytes, err := fabric.SubmitTransaction(r.Context(), channeID, chaincodeID, req.Name, req.Args...)
+	resultBytes, err := fabric.SubmitTransaction(r.Context(), channeID, chaincodeID, req.Func, req.Args...)
 	if err != nil {
+		fmt.Println(err)
 		http.Error(w, fmt.Sprintf("failed to submit transaction: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	var resultJson json.RawMessage
 	if err := json.Unmarshal(resultBytes, &resultJson); err != nil {
-		pgo.RespondText(w, http.StatusOK, string(resultBytes))
+		httputil.Text(w, http.StatusOK, string(resultBytes))
 		return
 	}
 
-	pgo.RespondJSON(w, http.StatusOK, resultJson)
+	httputil.JSON(w, http.StatusOK, resultJson)
 }

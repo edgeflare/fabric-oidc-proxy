@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/edgeflare/fabric-oidc-proxy/internal/config"
-	"github.com/edgeflare/pgo"
-	mw "github.com/edgeflare/pgo/middleware"
+	"github.com/edgeflare/pgo/pkg/httputil"
+	mw "github.com/edgeflare/pgo/pkg/httputil/middleware"
 	"go.uber.org/zap"
 )
 
@@ -24,12 +24,14 @@ func StartServer(conf *config.Config, logger *zap.Logger) error {
 	cfg = *conf
 
 	// Create a new pgo Router
-	r := pgo.NewRouter()
+	r := httputil.NewRouter()
 
 	// middleware
-	r.Use(mw.RequestID)
-	r.Use(mw.CORSWithOptions(nil)) // TODO: improve this
-	r.Use(mw.LoggerWithOptions(&mw.LoggerOptions{Logger: logger}))
+	r.Use(
+		mw.RequestID,
+		mw.CORSWithOptions(nil),
+		mw.LoggerWithOptions(nil),
+	)
 
 	// OIDC middleware for authentication
 	oidcConfig := mw.OIDCProviderConfig{
@@ -40,7 +42,14 @@ func StartServer(conf *config.Config, logger *zap.Logger) error {
 
 	// API v1 routes
 	apiv1 := r.Group("/api/v1")
+
+	// First apply authentication middleware
 	apiv1.Use(mw.VerifyOIDCToken(oidcConfig))
+
+	// Then apply authorization middleware
+	oidcAuthzFn := mw.WithOIDCAuthz(oidcConfig, "fabric.type") // roleClaimKey=fabric.type must be a string
+	// Convert it to HTTP middleware and use it
+	apiv1.Use(authorizationMiddleware(oidcAuthzFn))
 
 	apiv1.Handle("POST /account/enroll", http.HandlerFunc(enrollUserHandler))
 	apiv1.Handle("POST /{channel}/{chaincode}/submit-transaction", http.HandlerFunc(submitTxHandler))
@@ -59,7 +68,6 @@ func StartServer(conf *config.Config, logger *zap.Logger) error {
 
 	// Wait for SIGINT or SIGTERM
 	<-stop
-
 	logger.Info("Shutting down server...")
 
 	// Create a deadline for the shutdown
@@ -74,4 +82,23 @@ func StartServer(conf *config.Config, logger *zap.Logger) error {
 
 	logger.Info("Server gracefully stopped")
 	return nil
+}
+
+// authorizationMiddleware wraps AuthzFunc to create an http middleware
+func authorizationMiddleware(authzFn mw.AuthzFunc) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authzResp, err := authzFn(r.Context())
+			if err != nil {
+				http.Error(w, "Authorization error", http.StatusInternalServerError)
+				return
+			}
+			if !authzResp.Allowed {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			ctx := context.WithValue(r.Context(), httputil.OIDCRoleClaimCtxKey, authzResp.Role)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

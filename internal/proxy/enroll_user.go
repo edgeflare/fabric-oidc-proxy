@@ -8,19 +8,20 @@ import (
 
 	"github.com/edgeflare/fabric-oidc-proxy/internal/fabric"
 	"github.com/edgeflare/fabric-oidc-proxy/internal/util"
-	"github.com/edgeflare/pgo"
+
+	"github.com/edgeflare/pgo/pkg/httputil"
 	"github.com/hyperledger/fabric-ca/api"
 )
 
 // enrollUserHandler is a http.Handler that registers and enrolls a user with the Fabric CA.
 func enrollUserHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := pgo.OIDCUser(r)
-	if !ok || user.Active == false {
+	claims, ok := httputil.OIDCUser(r)
+	if !ok || claims == nil {
 		http.Error(w, "no user found", http.StatusUnauthorized)
 		return
 	}
 
-	fabricClaim, err := util.Jq(user.Claims, cfg.Fabric.CA.OIDCClaimKey)
+	fabricClaim, err := util.Jq(claims, cfg.Fabric.CA.OIDCClaimKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -40,7 +41,7 @@ func enrollUserHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	regReq.Name = user.Subject
+	regReq.Name = claims["sub"].(string)
 
 	userDir := filepath.Join(cfg.Fabric.CA.ClientHome, "users", regReq.Name)
 
@@ -62,5 +63,5 @@ func enrollUserHandler(w http.ResponseWriter, r *http.Request) {
 	keyCert.Cert = base64.StdEncoding.EncodeToString([]byte(keyCert.Cert))
 	keyCert.Key = base64.StdEncoding.EncodeToString([]byte(keyCert.Key))
 
-	pgo.RespondJSON(w, http.StatusOK, keyCert)
+	httputil.JSON(w, http.StatusOK, keyCert)
 }
